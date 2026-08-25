@@ -1,0 +1,12 @@
+target/
+data/
+*.mv.db
+*.trace.db
+*.log
+
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+.DS_Store

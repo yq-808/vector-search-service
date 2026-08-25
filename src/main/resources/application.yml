@@ -1,0 +1,45 @@
+spring:
+  application:
+    name: vector-search-service
+
+  datasource:
+    # File-backed H2: the corpus and its vectors survive a restart.
+    url: jdbc:h2:file:./data/vector-search;AUTO_SERVER=TRUE
+    driver-class-name: org.h2.Driver
+    username: sa
+    password: ""
+
+  sql:
+    init:
+      mode: always
+
+  jpa:
+    hibernate:
+      # The schema belongs to schema.sql, which is versioned with the code.
+      ddl-auto: none
+    open-in-view: false
+
+  h2:
+    console:
+      enabled: true
+      path: /h2-console
+
+vector:
+  embedding:
+    # Fixed by the service contract: every vector is 256 float32 values.
+    dimension: 256
+  vectorization:
+    workers: 4
+    queue-capacity: 10000
+    # Stands in for the latency of a real embedding API.
+    simulated-cost-millis: 200
+    shutdown-timeout-millis: 5000
+  search:
+    default-top-k: 10
+    max-top-k: 100
+    # Similarities at or below this are noise from hash collisions rather than real matches.
+    min-score: 0.0
+
+logging:
+  level:
+    com.example.vectorsearch: INFO

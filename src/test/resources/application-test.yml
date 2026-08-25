@@ -1,0 +1,13 @@
+spring:
+  datasource:
+    # Integration tests run against an in-memory H2, created from the same schema.sql.
+    url: jdbc:h2:mem:vector-search-test;DB_CLOSE_DELAY=-1
+
+vector:
+  vectorization:
+    # No artificial latency: tests assert on ordering and state, not on wall-clock behaviour.
+    simulated-cost-millis: 0
+
+logging:
+  level:
+    com.example.vectorsearch: WARN
