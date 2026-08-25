@@ -21,8 +21,13 @@ spring:
 
   h2:
     console:
-      enabled: true
+      # Off by default: it is a database shell on an open port. The dev profile below turns it on.
+      enabled: false
       path: /h2-console
+
+server:
+  # Let in-flight retrieval requests finish before the workers and the context are torn down.
+  shutdown: graceful
 
 vector:
   embedding:
@@ -43,3 +48,13 @@ vector:
 logging:
   level:
     com.example.vectorsearch: INFO
+
+---
+# Local inspection: run with --spring.profiles.active=dev to browse the H2 file at /h2-console.
+spring:
+  config:
+    activate:
+      on-profile: dev
+  h2:
+    console:
+      enabled: true

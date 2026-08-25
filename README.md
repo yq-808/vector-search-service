@@ -33,6 +33,9 @@ idempotent. To see the whole API in action:
 ./scripts/demo.sh
 ```
 
+To browse the database while it runs, start with `--spring.profiles.active=dev`, which exposes the
+H2 console at `/h2-console`. It is off by default: it is a database shell on an open port.
+
 ## API
 
 | Method | Path | Purpose |
@@ -60,8 +63,16 @@ curl -X POST localhost:8080/api/v1/search -H 'Content-Type: application/json' \
   -d '{"query":"searching vectors","topK":5,"channel":"docs"}'
 ```
 
-Errors come back in one shape: `404` unknown document or task, `400` invalid request, `409`
-concurrent modification of the same document, `503` vectorisation backlog full.
+Every error comes back in the same `{timestamp, status, error, message}` shape: `404` unknown
+document, task or path, `400` invalid request, `409` concurrent modification of the same document,
+`503` vectorisation backlog full, `500` anything unforeseen. That holds for the failures Spring MVC
+raises before a controller is reached too — malformed body, wrong method, unconvertible query
+parameter — because [`ApiExceptionHandler`](src/main/java/com/example/vectorsearch/api/ApiExceptionHandler.java)
+extends `ResponseEntityExceptionHandler` rather than only catching domain exceptions. Unexpected
+failures are logged in full and reported without internals.
+
+Document ids are restricted to `[A-Za-z0-9._~-]`, since every document is addressed as
+`/documents/{documentId}`.
 
 ## How it works
 
@@ -82,7 +93,12 @@ travel through it; the task row in H2 is the durable copy. Three details make th
 - on shutdown, workers are interrupted and the in-flight task is returned to `QUEUED`, so no
   submission is lost;
 - at startup, [`PendingTaskRecovery`](src/main/java/com/example/vectorsearch/vectorization/PendingTaskRecovery.java)
-  re-queues everything still pending, including tasks orphaned by an unclean stop.
+  re-queues everything still pending, including tasks orphaned by an unclean stop. A backlog left by
+  a crash can be larger than the queue is allowed to hold, so it publishes on its own thread and
+  waits for room instead of overflowing — refusing to start, or dropping the excess, would both be
+  worse answers;
+- the worker pool sits below the web server in the Spring lifecycle, so it starts before the first
+  request arrives and stops only after HTTP has drained.
 
 **Concurrency safety** is handled where the contention actually is, rather than with a lock around
 the service:
@@ -136,17 +152,18 @@ api/            controllers, DTOs, error handling
 mvn test
 ```
 
-58 tests, two kinds:
+69 tests, two kinds:
 
 - **Unit** — the embedding model (determinism, dimension, zero vector, relative similarity in
-  English and Chinese), vector maths, the queue, and the worker state machine with the database
-  mocked out.
+  English and Chinese), vector maths, the queue, startup recovery, and the worker state machine
+  with the database mocked out, including the interrupt path that shutdown takes.
 - **Black box** — every integration test drives the running service over HTTP only, never reaching
   into a bean. They cover the document lifecycle, ranking, channel filtering, invalidation, hit
-  counting, validation errors, the asynchronous contract (a document is *not* searchable until its
-  task finishes, and a re-submission cancels the in-flight one), 24 simultaneous submissions and 32
-  simultaneous searches counting exactly 32 hits, and a genuine stop-and-restart proving the H2 file
-  database keeps documents and vectors.
+  counting, validation errors, the single error shape (including the failures Spring raises before
+  a controller is reached), backpressure returning `503` once the queue is full, the asynchronous
+  contract (a document is *not* searchable until its task finishes, and a re-submission cancels the
+  in-flight one), 24 simultaneous submissions and 32 simultaneous searches counting exactly 32 hits,
+  and a genuine stop-and-restart proving the H2 file database keeps documents and vectors.
 
 ## 需求对照
 
@@ -163,6 +180,7 @@ mvn test
 | 文档列表与详情（入库时间、完成时间、向量就绪、失效状态） | `GET /documents`、`GET /documents/{id}` |
 | 元数据与命中计数（渠道默认 `default`，检索时更新） | `Document.hitCount`，原子 SQL 自增；`GET /stats` |
 | 多线程并发安全 | 条件更新 + 原子自增 + 乐观锁，见「Concurrency safety」 |
+| 统一错误响应 | `ApiExceptionHandler` 继承 `ResponseEntityExceptionHandler`，框架异常与业务异常同一响应体 |
 | Java 17+ / Spring / Guava / commons-lang3 | Spring Boot 3.5，Java 17 目标 |
 | H2 文件持久化 + DDL 随项目提供、启动自动建表 | `jdbc:h2:file:./data/vector-search`，`schema.sql` |
 | 队列不引入中间件，用 Java 实现 | `LinkedBlockingQueue` + 自建工作线程池 |

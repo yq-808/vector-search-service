@@ -77,6 +77,16 @@ public class VectorizationWorkerPool implements SmartLifecycle {
         return running;
     }
 
+    /**
+     * Below the web server's phase, which makes the workers start first and stop last. Shutdown
+     * therefore drains HTTP before the workers go away, so a request still being served can still
+     * hand its task to a running worker.
+     */
+    @Override
+    public int getPhase() {
+        return Integer.MAX_VALUE - 2048;
+    }
+
     private void consume() {
         while (running) {
             String taskId;

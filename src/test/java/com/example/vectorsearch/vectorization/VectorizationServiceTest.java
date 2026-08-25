@@ -131,6 +131,40 @@ class VectorizationServiceTest {
         verify(taskRepository, never()).save(any());
     }
 
+    /**
+     * Shutdown interrupts the workers mid-flight. Whatever they were doing must go back on the
+     * queue, not be recorded as a failure: no submission is lost by stopping the service.
+     */
+    @Test
+    void returnsAnInterruptedTaskToTheQueue() throws InterruptedException {
+        VectorProperties slow = new VectorProperties(
+                new VectorProperties.Embedding(256),
+                new VectorProperties.Vectorization(1, 10, 30_000, 1000),
+                new VectorProperties.Search(10, 100, 0.0));
+        VectorizationService slowService = new VectorizationService(taskRepository, documentRepository,
+                new HashingEmbeddingModel(slow), queue, transactionManager, slow);
+        claimable();
+        when(documentRepository.findById(DOCUMENT_ID)).thenReturn(Optional.of(document()));
+
+        Thread worker = new Thread(() -> slowService.process(TASK_ID), "test-worker");
+        worker.start();
+        awaitSimulatedEmbeddingCall(worker);
+        worker.interrupt();
+        worker.join(5_000);
+
+        assertThat(worker.isAlive()).isFalse();
+        verify(taskRepository).requeue(TASK_ID);
+        verify(taskRepository, never()).finish(anyString(), any(), any(), any());
+    }
+
+    /** Interrupting earlier would still work, but this exercises the path shutdown actually takes. */
+    private static void awaitSimulatedEmbeddingCall(Thread worker) {
+        Instant deadline = Instant.now().plusSeconds(5);
+        while (worker.getState() != Thread.State.TIMED_WAITING && Instant.now().isBefore(deadline)) {
+            Thread.onSpinWait();
+        }
+    }
+
     private void claimable() {
         when(taskRepository.claim(eq(TASK_ID), any())).thenReturn(true);
         when(taskRepository.findById(TASK_ID))

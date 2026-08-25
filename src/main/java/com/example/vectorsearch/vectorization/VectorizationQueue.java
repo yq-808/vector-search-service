@@ -44,6 +44,16 @@ public class VectorizationQueue {
         }
     }
 
+    /**
+     * Enqueues a task id, waiting for room if the queue is full.
+     *
+     * <p>Used by startup recovery, where the durable backlog can legitimately be larger than the
+     * queue and there is no caller to push back on &mdash; only workers to wait for.
+     */
+    public void put(String taskId) throws InterruptedException {
+        pending.put(taskId);
+    }
+
     /** Blocks until a task id is available. */
     public String take() throws InterruptedException {
         return pending.take();
